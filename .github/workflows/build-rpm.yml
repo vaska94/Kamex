@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Existing release tag to rebuild and republish (e.g. v1.9.6); leave empty for a build-only run'
+        required: false
+        default: ''
 
 jobs:
   build-el10:
@@ -37,6 +42,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Fix git ownership
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -51,11 +58,23 @@ jobs:
 
       - name: Get version
         id: version
+        env:
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           VERSION=$(tr -d '[:space:]' < VERSION)
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+          if [ -n "$INPUT_REF" ]; then
+            REF_NAME="$INPUT_REF"
+            echo "$REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::ref $REF_NAME is not a release tag"; exit 1; }
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            REF_NAME="$GITHUB_REF_NAME"
+          fi
+          if [ -n "$REF_NAME" ] && [ "${REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $REF_NAME does not match VERSION file ($VERSION)"
             exit 1
+          fi
+          if [ -n "$INPUT_REF" ]; then
+            # old tags shipped stale spec versions; the tag and VERSION are authoritative
+            sed -i "s/^Version:\([[:space:]]*\).*/Version:\1$VERSION/" rpm/*.spec
           fi
           for spec in rpm/*.spec; do
             SPEC_VERSION=$(awk '/^Version:/ {print $2}' "$spec")
@@ -133,6 +152,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Download RPM artifacts
         uses: actions/download-artifact@v4
@@ -161,24 +182,33 @@ jobs:
 
       - name: Get version and SOURCE_DATE_EPOCH
         id: version
+        env:
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           VERSION=$(tr -d '[:space:]' < VERSION)
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+          if [ -n "$INPUT_REF" ]; then
+            REF_NAME="$INPUT_REF"
+            echo "$REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::ref $REF_NAME is not a release tag"; exit 1; }
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            REF_NAME="$GITHUB_REF_NAME"
+          fi
+          if [ -n "$REF_NAME" ] && [ "${REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $REF_NAME does not match VERSION file ($VERSION)"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          [ -n "$INPUT_REF" ] || echo "floating=ghcr.io/${GITHUB_REPOSITORY_OWNER}/kamex:latest" >> $GITHUB_OUTPUT
           echo "source_date_epoch=$(git log -1 --format=%ct)" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: docker/
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.ref != '' }}
           build-args: |
             SOURCE_DATE_EPOCH=${{ steps.version.outputs.source_date_epoch }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/kamex:latest
+            ${{ steps.version.outputs.floating }}
             ghcr.io/${{ github.repository_owner }}/kamex:${{ steps.version.outputs.version }}
 
   docker-alpine:
@@ -191,6 +221,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -204,13 +236,22 @@ jobs:
 
       - name: Get version and SOURCE_DATE_EPOCH
         id: version
+        env:
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           VERSION=$(tr -d '[:space:]' < VERSION)
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+          if [ -n "$INPUT_REF" ]; then
+            REF_NAME="$INPUT_REF"
+            echo "$REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::ref $REF_NAME is not a release tag"; exit 1; }
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            REF_NAME="$GITHUB_REF_NAME"
+          fi
+          if [ -n "$REF_NAME" ] && [ "${REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $REF_NAME does not match VERSION file ($VERSION)"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          [ -n "$INPUT_REF" ] || echo "floating=ghcr.io/${GITHUB_REPOSITORY_OWNER}/kamex:alpine" >> $GITHUB_OUTPUT
           echo "source_date_epoch=$(git log -1 --format=%ct)" >> $GITHUB_OUTPUT
 
       - name: Build and push Alpine image
@@ -218,9 +259,9 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.alpine
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.ref != '' }}
           build-args: |
             SOURCE_DATE_EPOCH=${{ steps.version.outputs.source_date_epoch }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/kamex:alpine
+            ${{ steps.version.outputs.floating }}
             ghcr.io/${{ github.repository_owner }}/kamex:${{ steps.version.outputs.version }}-alpine
