@@ -2,6 +2,17 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [1.9.8] - 2026-10-18
+
+### Fixed
+- **Release builds published Docker images and RPMs under the wrong version.**
+  The release workflow read the version from `rpm/kamex.spec`, which was not
+  bumped for 1.9.6 and 1.9.7, so those releases were published as 1.9.5 and
+  overwrote the `1.9.5` image tag (#7). The workflow now reads `VERSION`, fails
+  if the git tag differs from it, and fails the RPM build if any
+  `rpm/*.spec` disagrees. The spec files, addon `configure.ac` files and README
+  badge are brought up to date. No code changes.
+
 ## [1.9.7] - 2026-08-30
 
 ### Security
