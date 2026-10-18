@@ -52,7 +52,18 @@ jobs:
       - name: Get version
         id: version
         run: |
-          VERSION=$(grep 'Version:' rpm/kamex.spec | awk '{print $2}')
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+            exit 1
+          fi
+          for spec in rpm/*.spec; do
+            SPEC_VERSION=$(awk '/^Version:/ {print $2}' "$spec")
+            if [ "$SPEC_VERSION" != "$VERSION" ]; then
+              echo "::error::$spec has Version $SPEC_VERSION, VERSION file says $VERSION"
+              exit 1
+            fi
+          done
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create source tarball
@@ -151,7 +162,11 @@ jobs:
       - name: Get version and SOURCE_DATE_EPOCH
         id: version
         run: |
-          VERSION=$(grep 'Version:' rpm/kamex.spec | awk '{print $2}')
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "source_date_epoch=$(git log -1 --format=%ct)" >> $GITHUB_OUTPUT
 
@@ -190,7 +205,11 @@ jobs:
       - name: Get version and SOURCE_DATE_EPOCH
         id: version
         run: |
-          VERSION=$(grep 'Version:' rpm/kamex.spec | awk '{print $2}')
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION file ($VERSION)"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "source_date_epoch=$(git log -1 --format=%ct)" >> $GITHUB_OUTPUT
 
